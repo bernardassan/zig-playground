@@ -5,18 +5,25 @@ const block_size = 4096;
 
 pub fn main() !void {
     var stdout_buf: [1024]u8 = undefined;
+    var stderr_buf: [1024]u8 = undefined;
+
     var alloc: std.heap.DebugAllocator(.{}) = .init;
     const smp_alloc = alloc.allocator();
 
     var stdout = std.fs.File.stdout().writer(&stdout_buf);
+    var stderr = std.fs.File.stderr().writer(&stderr_buf);
+
     var stdout_w = &stdout.interface;
     defer stdout_w.flush() catch unreachable;
+
+    var stderr_w = &stderr.interface;
+    defer stderr_w.flush() catch unreachable;
 
     const args = try std.process.argsAlloc(smp_alloc);
     defer std.process.argsFree(smp_alloc, args);
 
     if (args.len < 2) {
-        return try stdout_w.writeAll("Usage: zig build run -- <filename1> [<filename2>...]\n");
+        return try stderr_w.writeAll("Usage: zig build run -- <filename1> [<filename2>...]\n");
     }
 
     for (1..args.len) |arg_index| {
@@ -26,6 +33,7 @@ pub fn main() !void {
 
 fn readAndPrintFile(allocator: std.mem.Allocator, stdout: *std.Io.Writer, file_path: []const u8) !usize {
     const file = try fs.cwd().openFile(file_path, .{ .mode = .read_only });
+    defer file.close();
 
     const size = (try file.stat()).size;
 
@@ -33,11 +41,15 @@ fn readAndPrintFile(allocator: std.mem.Allocator, stdout: *std.Io.Writer, file_p
     if (size % block_size != 0) blocks += 1;
 
     var iovec = try allocator.alloc(std.posix.iovec, blocks);
+    defer allocator.free(iovec);
+
     var current_block: usize = 0;
     var bytes_remaining = size;
     while (bytes_remaining != 0) : (current_block += 1) {
         const bytes_to_read = if (bytes_remaining > block_size) block_size else bytes_remaining;
+
         const buf = try allocator.alignedAlloc(u8, .fromByteUnits(block_size), bytes_to_read);
+
         iovec[current_block] = .{ .base = buf.ptr, .len = buf.len };
         bytes_remaining -= bytes_to_read;
     }
