@@ -1,5 +1,6 @@
 #include <fcntl.h>
 #include <linux/fs.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -58,8 +59,8 @@ struct file_info {
  * functions.
  * */
 
-int io_uring_setup(unsigned entries, struct io_uring_params *p) {
-  return (int)syscall(__NR_io_uring_setup, entries, p);
+int io_uring_setup(unsigned entries, struct io_uring_params *params) {
+  return (int)syscall(__NR_io_uring_setup, entries, params);
 }
 
 int io_uring_enter(int ring_fd, unsigned int to_submit,
@@ -74,21 +75,25 @@ int io_uring_enter(int ring_fd, unsigned int to_submit,
  * */
 
 off_t get_file_size(int fd) {
-  struct stat st;
+  struct stat stat;
 
-  if (fstat(fd, &st) < 0) {
+  if (fstat(fd, &stat) < 0) {
     perror("fstat");
     return -1;
   }
-  if (S_ISBLK(st.st_mode)) {
-    unsigned long long bytes;
+
+  if (S_ISBLK(stat.st_mode)) {
+    auto bytes = 0;
     if (ioctl(fd, BLKGETSIZE64, &bytes) != 0) {
       perror("ioctl");
       return -1;
     }
     return bytes;
-  } else if (S_ISREG(st.st_mode))
-    return st.st_size;
+  }
+
+  if (S_ISREG(stat.st_mode)) {
+    return stat.st_size;
+  }
 
   return -1;
 }
@@ -102,19 +107,16 @@ off_t get_file_size(int fd) {
  * it does offer you a certain strange geeky peace.
  * */
 
-int app_setup_uring(struct submitter *s) {
-  struct app_io_sq_ring *sring = &s->sq_ring;
-  struct app_io_cq_ring *cring = &s->cq_ring;
+int app_setup_uring(struct submitter *sub) {
   struct io_uring_params params;
-
   /*
    * We need to pass in the io_uring_params structure to the io_uring_setup()
    * call zeroed out. We could set any flags if we need to, but for this
    * example, we don't.
    * */
   memset(&params, 0, sizeof(params));
-  s->ring_fd = io_uring_setup(QUEUE_DEPTH, &params);
-  if (s->ring_fd < 0) {
+  sub->ring_fd = io_uring_setup(QUEUE_DEPTH, &params);
+  if (sub->ring_fd < 0) {
     perror("io_uring_setup");
     return 1;
   }
@@ -126,9 +128,9 @@ int app_setup_uring(struct submitter *s) {
    * has an indirection array in between. We map that in as well.
    * */
 
-  int sring_sz = params.sq_off.array + params.sq_entries * sizeof(unsigned);
-  int cring_sz =
-      params.cq_off.cqes + params.cq_entries * sizeof(struct io_uring_cqe);
+  auto sring_sz = params.sq_off.array + (params.sq_entries * sizeof(unsigned));
+  auto cring_sz =
+      params.cq_off.cqes + (params.cq_entries * sizeof(struct io_uring_cqe));
 
   /* In kernel version 5.4 and above, it is possible to map the submission and
    * completion buffers with a single mmap() call. Rather than check for kernel
@@ -149,7 +151,7 @@ int app_setup_uring(struct submitter *s) {
    * */
   void *sq_ptr =
       mmap(nullptr, sring_sz, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE,
-           s->ring_fd, IORING_OFF_SQ_RING);
+           sub->ring_fd, IORING_OFF_SQ_RING);
   if (sq_ptr == MAP_FAILED) {
     perror("mmap");
     munmap(sq_ptr, sring_sz);
@@ -162,13 +164,17 @@ int app_setup_uring(struct submitter *s) {
   } else {
     /* Map in the completion queue ring buffer in older kernels separately */
     cq_ptr = mmap(nullptr, cring_sz, PROT_READ | PROT_WRITE,
-                  MAP_SHARED | MAP_POPULATE, s->ring_fd, IORING_OFF_CQ_RING);
+                  MAP_SHARED | MAP_POPULATE, sub->ring_fd, IORING_OFF_CQ_RING);
     if (cq_ptr == MAP_FAILED) {
       perror("mmap");
       munmap(sq_ptr, sring_sz);
       return 1;
     }
   }
+
+  struct app_io_sq_ring *sring = &sub->sq_ring;
+  struct app_io_cq_ring *cring = &sub->cq_ring;
+
   /* Save useful fields in a global app_io_sq_ring struct for later
    * easy reference */
   sring->head = sq_ptr + params.sq_off.head;
@@ -179,10 +185,10 @@ int app_setup_uring(struct submitter *s) {
   sring->array = sq_ptr + params.sq_off.array;
 
   /* Map in the submission queue entries array */
-  s->sqes = mmap(nullptr, params.sq_entries * sizeof(struct io_uring_sqe),
-                 PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, s->ring_fd,
-                 IORING_OFF_SQES);
-  if (s->sqes == MAP_FAILED) {
+  sub->sqes = mmap(nullptr, params.sq_entries * sizeof(struct io_uring_sqe),
+                   PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE,
+                   sub->ring_fd, IORING_OFF_SQES);
+  if (sub->sqes == MAP_FAILED) {
     perror("mmap");
     return 1;
   }
@@ -203,7 +209,7 @@ int app_setup_uring(struct submitter *s) {
  * We use buffered output here to be efficient,
  * since we need to output character-by-character.
  * */
-void output_to_console(char *buf, int len) {
+void output_to_console(char *buf, size_t len) {
   while (len--) {
     fputc(*buf++, stdout);
   }
@@ -233,17 +239,20 @@ void read_from_cq(struct submitter *sub) {
     /* Get the entry */
     struct io_uring_cqe *cqe = &cring->cqes[head & *sub->cq_ring.ring_mask];
 
-    auto fi = (struct file_info *)cqe->user_data;
-    if (cqe->res < 0)
-      fprintf(stderr, "Error: %s\n", strerror(abs(cqe->res)));
+    auto file_info = (struct file_info *)cqe->user_data;
+    if (cqe->res < 0) {
+      (void)fprintf(stderr, "Error: %s\n", strerror(abs(cqe->res)));
+    }
 
-    int blocks = (int)fi->file_sz / BLOCK_SZ;
-    if (fi->file_sz % BLOCK_SZ) {
+    int blocks = (int)file_info->file_sz / BLOCK_SZ;
+    if (file_info->file_sz % BLOCK_SZ) {
       blocks++;
     }
 
-    for (int i = 0; i < blocks; i++)
-      output_to_console(fi->iovecs[i].iov_base, fi->iovecs[i].iov_len);
+    for (int index = 0; index < blocks; index++) {
+      output_to_console(file_info->iovecs[index].iov_base,
+                        file_info->iovecs[index].iov_len);
+    }
 
     head++;
   } while (1);
@@ -271,15 +280,15 @@ int submit_to_sq(char *file_path, struct submitter *sub) {
     return 1;
   }
   off_t bytes_remaining = file_sz;
-  int blocks = (int)file_sz / BLOCK_SZ;
+  auto blocks = (size_t)file_sz / BLOCK_SZ;
   if (file_sz % BLOCK_SZ) {
     blocks++;
   }
 
   struct file_info *fileinfo =
-      malloc(sizeof(struct file_info) + sizeof(struct iovec) * blocks);
+      malloc(sizeof(struct file_info) + (sizeof(struct iovec) * blocks));
   if (!fileinfo) {
-    fprintf(stderr, "Unable to allocate memory\n");
+    (void)fprintf(stderr, "Unable to allocate memory\n");
     return 1;
   }
   fileinfo->file_sz = file_sz;
@@ -292,19 +301,19 @@ int submit_to_sq(char *file_path, struct submitter *sub) {
    * */
   unsigned current_block = 0;
   while (bytes_remaining) {
-    off_t bytes_to_read = bytes_remaining;
+    ssize_t bytes_to_read = bytes_remaining;
     if (bytes_to_read > BLOCK_SZ) {
       bytes_to_read = BLOCK_SZ;
     }
 
-    fileinfo->iovecs[current_block].iov_len = bytes_to_read;
-
-    void *buf;
+    void *buf = nullptr;
     if (posix_memalign(&buf, BLOCK_SZ, BLOCK_SZ)) {
       perror("posix_memalign");
+      free(fileinfo);
       return 1;
     }
-    fileinfo->iovecs[current_block].iov_base = buf;
+    fileinfo->iovecs[current_block] =
+        (struct iovec){.iov_base = buf, .iov_len = (size_t)bytes_to_read};
 
     current_block++;
     bytes_remaining -= bytes_to_read;
@@ -321,10 +330,10 @@ int submit_to_sq(char *file_path, struct submitter *sub) {
   sqe->fd = file_fd;
   sqe->flags = 0;
   sqe->opcode = IORING_OP_READV;
-  sqe->addr = (unsigned long)fileinfo->iovecs;
-  sqe->len = blocks;
+  sqe->addr = (uint64_t)fileinfo->iovecs;
+  sqe->len = (uint32_t)blocks;
   sqe->off = 0;
-  sqe->user_data = (unsigned long long)fileinfo;
+  sqe->user_data = (uint64_t)fileinfo;
   sring->array[index] = index;
   tail = next_tail;
 
@@ -349,14 +358,7 @@ int submit_to_sq(char *file_path, struct submitter *sub) {
   return 0;
 }
 
-void foo();
-void foo() {
-  char achar[] = "abcd1234";
-  strcpy(achar, achar + 4);
-}
-
 int main(int argc, char *argv[]) {
-
   if (argc < 2) {
     (void)fprintf(stderr, "Usage: %s <filename>\n", argv[0]);
     return 1;
@@ -384,5 +386,6 @@ int main(int argc, char *argv[]) {
     read_from_cq(sub);
   }
 
+  free(sub);
   return 0;
 }
