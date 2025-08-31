@@ -8,12 +8,15 @@ const block_sz = 4096;
 
 const Allocator = std.mem.Allocator;
 
-// This is x86 specific
-fn read_barrier() void {
-    asm volatile ("" ::: .{ .memory = true });
+// Barriers needed by io_uring
+fn read_barrier(ptr: anytype) @TypeOf(ptr.*) {
+    const T = @TypeOf(ptr.*);
+    return @atomicLoad(T, ptr, .acquire);
 }
-fn write_barrier() void {
-    asm volatile ("" ::: .{ .memory = true });
+
+fn write_barrier(ptr: anytype, value: anytype) void {
+    const T = @TypeOf(ptr.*);
+    @atomicStore(T, ptr, value, .release);
 }
 const app_io_sq_ring = struct {
     head: *u32,
@@ -119,10 +122,9 @@ fn app_setup_uring(stderr: *std.Io.Writer, sub: *submitter) !void {
 // the data buffer that will have the file data and print it to the console.
 fn read_from_cq(stderr: *std.Io.Writer, stdout: *std.Io.Writer, sub: *submitter) !void {
     const cring = &sub.cq_ring;
-    var head = cring.head.*;
+    var head: u32 = read_barrier(cring.head);
 
     while (true) {
-        read_barrier();
         // Remember, this is a ring buffer. If head == tail, it means that the
         // buffer is empty.
         if (head == cring.tail.*) {
@@ -151,8 +153,7 @@ fn read_from_cq(stderr: *std.Io.Writer, stdout: *std.Io.Writer, sub: *submitter)
         head += 1;
     }
 
-    cring.head.* = head;
-    write_barrier();
+    write_barrier(cring.head, head);
 }
 
 // Submit to submission queue.
@@ -193,10 +194,9 @@ fn submit_to_sq(arena: Allocator, stderr: *std.Io.Writer, file_path: []const u8,
 
     const sring = &sub.sq_ring;
     // Add our submission queue entry to the tail of the SQE ring buffer
-    var tail = sring.tail.*;
+    var tail: u32 = read_barrier(sring.tail);
     var next_tail = tail;
     next_tail += 1;
-    read_barrier();
     const index = tail & sub.sq_ring.ring_mask.*;
     const sqe = &sub.sqes[index];
     sqe.fd = file_fd.handle;
@@ -211,8 +211,7 @@ fn submit_to_sq(arena: Allocator, stderr: *std.Io.Writer, file_path: []const u8,
 
     // Umap the tail so the kernel can see it.
     if (sring.tail.* != tail) {
-        sring.tail.* = tail;
-        write_barrier();
+        write_barrier(sring.tail, tail);
     }
 
     // Tell the kernel we have submitted events with the io_uring_enter() system
