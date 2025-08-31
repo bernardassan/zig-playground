@@ -1,10 +1,10 @@
 CompileFlags:
-  Add: [-xc, -D_XOPEN_SOURCE=800, -Wall, -Wextra, -pedantic, -pedantic-errors, -std=c2y]
+  Add: [-xc]
 Diagnostics:
   ClangTidy:
     Add: ['*']
     # Toggle(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers) useful but produces too many unlogical (too much effort to fix) warnings
-    Remove: [altera-*, readability-magic-numbers, cppcoreguidelines-avoid-magic-numbers, readability-avoid-const-params-in-decls, llvmlibc-restrict-system-libc-headers, misc-no-recursion]
+    Remove: [abseil-*, altera-*, android-*, darwin-*, llvmlibc-*, fuchsia-*, objc-*, readability-magic-numbers, cppcoreguidelines-avoid-magic-numbers, readability-avoid-const-params-in-decls, misc-no-recursion]
     FastCheckFilter: None # Run checks regardless of their speed
 InlayHints:
   BlockEnd: Yes

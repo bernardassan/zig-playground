@@ -1,0 +1,18 @@
+# NOTE: https://man7.org/linux/man-pages/man7/feature_test_macros.7.html
+# https://stackoverflow.com/questions/5378778/what-does-d-xopen-source-do-mean
+# https://pubs.opengroup.org/onlinepubs/9799919799/
+-D_XOPEN_SOURCE=800
+-Wall
+-Weverything
+-Wextra
+-Wno-c++98-compat
+-Wno-declaration-after-statement
+-Wno-pre-c2x-compat
+-Wno-pre-c2y-compat
+-Wno-switch-default
+-Wno-unsafe-buffer-usage
+-Wno-used-but-marked-unused
+-Wno-vla
+-pedantic
+-pedantic-errors
+-std=c2y
