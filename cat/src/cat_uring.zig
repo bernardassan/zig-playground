@@ -1,12 +1,14 @@
+//! https://unixism.net/2020/04/io-uring-by-example-part-1-introduction/
 const std = @import("std");
 const linux = std.os.linux;
 const posix = std.posix;
 const process = std.process;
+const Allocator = std.mem.Allocator;
 
 const queue_depth = 1;
+const max_submit_task = 1;
+const max_wait_task = 1;
 const block_sz = 4096;
-
-const Allocator = std.mem.Allocator;
 
 // Barriers needed by io_uring
 fn read_barrier(ptr: anytype) @TypeOf(ptr.*) {
@@ -44,7 +46,7 @@ const submitter = struct {
 
 const file_info = struct {
     file_sz: usize,
-    iovecs: []std.posix.iovec, //Referred by readv/writev
+    iovecs: []std.posix.iovec, // Referred by readv/writev
 };
 
 // io_uring requires a lot of setup which looks pretty hairy, but isn't all
@@ -122,7 +124,7 @@ fn app_setup_uring(stderr: *std.Io.Writer, sub: *submitter) !void {
 // the data buffer that will have the file data and print it to the console.
 fn read_from_cq(stderr: *std.Io.Writer, stdout: *std.Io.Writer, sub: *submitter) !void {
     const cring = &sub.cq_ring;
-    var head: u32 = read_barrier(cring.head);
+    var head: u32 = read_barrier(cring.head); // ensure previous writes are visible
 
     while (true) {
         // Remember, this is a ring buffer. If head == tail, it means that the
@@ -132,7 +134,7 @@ fn read_from_cq(stderr: *std.Io.Writer, stdout: *std.Io.Writer, sub: *submitter)
         }
 
         // Get the entry
-        const index = head & sub.cq_ring.ring_mask.*;
+        const index = head & cring.ring_mask.*;
         const cqe = &cring.cqes[index];
         const err = posix.errno(@as(isize, @intCast(cqe.res)));
         if (err != .SUCCESS) {
@@ -150,6 +152,7 @@ fn read_from_cq(stderr: *std.Io.Writer, stdout: *std.Io.Writer, sub: *submitter)
         while (block < blocks) : (block += 1) {
             try stdout.print("{s}", .{fileinfo.iovecs[block].base[0..fileinfo.iovecs[block].len]});
         }
+        // we are done consuming this entry
         head += 1;
     }
 
@@ -164,52 +167,52 @@ fn submit_to_sq(arena: Allocator, stderr: *std.Io.Writer, file_path: []const u8,
     const file_fd = try std.fs.cwd().openFile(file_path, .{ .mode = .read_only });
 
     const file_sz = (try file_fd.stat()).size;
-    var bytes_remaining = file_sz;
-    var blocks = file_sz / block_sz;
-    if (file_sz % block_sz != 0) {
-        blocks += 1;
-    }
+    const blocks = blk: {
+        var blocks = file_sz / block_sz;
+        if (file_sz % block_sz != 0) blocks += 1;
+        break :blk blocks;
+    };
 
     const fileinfo = try arena.create(file_info);
-    fileinfo.iovecs = try arena.alloc(posix.iovec, blocks);
-
     fileinfo.file_sz = file_sz;
+    fileinfo.iovecs = try arena.alloc(posix.iovec, blocks);
 
     // For each block of the file we need to read, we allocate an iovec struct
     // which is indexed into the iovecs array. This array is passed in as part
     // of the submission. If you don't understand this, then you need to look
     // up how the readv() and writev() system calls work.
     var current_block: usize = 0;
+    var bytes_remaining = file_sz;
     while (bytes_remaining != 0) : (current_block += 1) {
-        var bytes_to_read = bytes_remaining;
-        if (bytes_to_read > block_sz) {
-            bytes_to_read = block_sz;
-        }
+        const bytes_to_read = if (bytes_remaining > block_sz) block_sz else bytes_remaining;
+        defer bytes_remaining -= bytes_to_read;
 
-        const buf = try arena.alignedAlloc(u8, .fromByteUnits(block_sz), block_sz);
+        const buf = try arena.alignedAlloc(u8, .fromByteUnits(block_sz), bytes_to_read);
+
         fileinfo.iovecs[current_block] = .{ .base = buf.ptr, .len = bytes_to_read };
-
-        bytes_remaining -= bytes_to_read;
     }
 
-    const sring = &sub.sq_ring;
     // Add our submission queue entry to the tail of the SQE ring buffer
+    const sring = &sub.sq_ring;
+
     var tail: u32 = read_barrier(sring.tail);
-    var next_tail = tail;
-    next_tail += 1;
-    const index = tail & sub.sq_ring.ring_mask.*;
+    const index = tail & sring.ring_mask.*;
     const sqe = &sub.sqes[index];
+
+    // fills in the SQE details for this IO request
     sqe.fd = file_fd.handle;
     sqe.flags = 0;
     sqe.opcode = linux.IORING_OP.READV;
     sqe.addr = @intFromPtr(fileinfo.iovecs.ptr);
-    sqe.len = @intCast(blocks);
+    sqe.len = @intCast(fileinfo.iovecs.len);
     sqe.off = 0;
     sqe.user_data = @intFromPtr(fileinfo);
-    sring.array[index] = index;
-    tail = next_tail;
 
-    // Umap the tail so the kernel can see it.
+    // fill the SQE index into the SQ ring array
+    sring.array[index] = index;
+
+    // Update the tail so the kernel can see it.
+    tail += 1;
     if (sring.tail.* != tail) {
         write_barrier(sring.tail, tail);
     }
@@ -218,7 +221,7 @@ fn submit_to_sq(arena: Allocator, stderr: *std.Io.Writer, file_path: []const u8,
     // call. We also pass in the IOURING_ENTER_GETEVENTS flag which causes the
     // io_uring_enter() call to wait until min_complete events (the 3rd param)
     // complete.
-    const ret = linux.io_uring_enter(sub.ring_fd, 1, 1, linux.IORING_ENTER_GETEVENTS, null);
+    const ret = linux.io_uring_enter(sub.ring_fd, max_submit_task, max_wait_task, linux.IORING_ENTER_GETEVENTS, null);
     const err = posix.errno(ret);
     if (err != .SUCCESS) {
         try stderr.print("io_uring_enter error: {t}", .{err});
