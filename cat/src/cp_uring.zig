@@ -11,8 +11,11 @@ const mem = std.mem;
 const queue_depth = 2;
 const block_sz = 16 * 1024;
 
+pub const std_options: std.Options = .{ .log_level = .debug };
+const log = std.log.scoped(.cp_uring);
+
 const io_data = struct {
-    read: i32,
+    read: bool,
     first_offset: usize,
     offset: usize,
     first_len: usize,
@@ -24,14 +27,15 @@ fn setup_context(entries: u16, flags: u32) !IoUring {
     return uring;
 }
 
-fn queue_prepped(ring: *IoUring, infd: fs.File, outfd: fs.File, data: *io_data) void {
+fn queue_prepped(ring: *IoUring, infile: fs.File, outfile: fs.File, data: *io_data) !void {
     const sqe = try ring.get_sqe();
 
     if (data.read) {
-        sqe.prep_read_fixed(infd.handle, &data.iov, 1, data.offset);
+        sqe.prep_readv(infile.handle, &.{data.iov}, data.offset);
     } else {
-        sqe.prep_writev(outfd.handle, &data.iov, 1, data.offset);
+        sqe.prep_writev(outfile.handle, &.{@bitCast(data.iov)}, data.offset);
     }
+    dump_sqe(sqe);
     sqe_set_data(sqe, data);
 }
 
@@ -39,118 +43,142 @@ fn sqe_set_data(sqe: *linux.io_uring_sqe, data: *anyopaque) void {
     sqe.user_data = @intFromPtr(data);
 }
 
-fn queue_read(ring: *IoUring, allocator: std.mem.Allocator, infd: fs.File, size: usize, offset: posix.off_t) !void {
+fn queue_read(ring: *IoUring, allocator: std.mem.Allocator, infile: fs.File, size: usize, offset: usize) !void {
     // data = malloc(size + sizeof(*data));
     const data = try allocator.create(io_data);
-    errdefer allocator.free(data);
+    errdefer allocator.destroy(data);
 
     const sqe = try ring.get_sqe();
 
-    data.read = 1;
+    data.read = true;
     data.offset = offset;
     data.first_offset = offset;
 
-    data.iov.base = data + 1;
+    data.iov.base = @as([*]u8, @ptrCast(data)) + 1;
     data.iov.len = size;
     data.first_len = size;
 
-    sqe.prep_readv(infd.handle, &data.iov, 1, offset);
+    sqe.prep_readv(infile.handle, &.{data.iov}, offset);
+    dump_sqe(sqe);
     sqe_set_data(sqe, data);
 }
 
-fn queue_write(ring: *IoUring, data: *io_data) u32 {
-    data.read = 0;
+fn queue_write(ring: *IoUring, infile: fs.File, outfile: fs.File, data: *io_data) !u32 {
+    data.read = false;
     data.offset = data.first_offset;
 
-    data.iov.iov_base = data + 1;
-    data.iov.iov_len = data.first_len;
+    data.iov.base = @as([*]u8, @ptrCast(data)) + 1;
+    data.iov.len = data.first_len;
 
-    queue_prepped(ring, data);
+    try queue_prepped(ring, infile, outfile, data);
     return try ring.submit();
 }
 
-fn copy_file(ring: *IoUring, stderr: *Io.Writer, allocator: mem.Allocator, insize: posix.off_t) !i32 {
-    const write_left = insize;
-    const offset = 0;
-    const writes = offset;
-    const reads = offset;
-
-    while (insize || write_left) {
+fn copy_file(ring: *IoUring, allocator: mem.Allocator, infile: fs.File, outfile: fs.File, insize: usize) !void {
+    var write_left: usize = insize;
+    const end = 0;
+    var insize_ = insize;
+    while (insize_ != end or write_left != end) {
+        var offset: usize = 0;
+        var reads = offset;
+        var writes = offset;
         // Queue up as many reads as we can
         const had_reads = reads;
 
-        while (insize) {
-            const this_size = insize;
+        while (insize_ != 0) : (reads += 1) {
+            if (reads + writes >= queue_depth) break;
 
-            if (reads + writes >= queue_depth)
-                break;
-            if (this_size > block_sz) {
-                this_size = block_sz;
-            } else if (!this_size)
-                break;
+            const this_size = if (insize_ > block_sz) block_sz else if (insize_ == 0) break else insize_;
+            defer insize_ -= this_size;
+            defer offset += this_size;
 
-            if (queue_read(ring, this_size, offset))
-                break;
-
-            insize -= this_size;
-            offset += this_size;
-            reads += 1;
+            try queue_read(ring, allocator, infile, this_size, offset);
         }
 
         if (had_reads != reads) {
-            const ret = try ring.submit();
-            if (ret < 0) {
-                try stderr.print("io_uring_submit: {s}\n", .{-ret});
-                break;
-            }
+            _ = try ring.submit();
         }
 
         // Queue is full at this point. Let's find at least one completion
-        while (write_left) {
+        while (write_left != 0) {
             const cqe = try ring.copy_cqe();
 
-            const data = cqe_get_data(io_data, cqe);
-            if (cqe.res < 0) {
-                if (cqe.res == -linux.E.AGAIN) {
-                    queue_prepped(ring, data);
+            const data = cqe_get_data(io_data, &cqe);
+            if (cqe.err() != .SUCCESS) {
+                const err = cqe.err();
+                if (err == .AGAIN) {
+                    try queue_prepped(ring, infile, outfile, data);
                     // ring.cqe_seen(cqe); // not needed with copy_cqe
                     continue;
                 }
-                try stderr.print("cqe failed: {s}\n", .{-cqe.res});
-                return 1;
+                log.err("cqe failed: {t}", .{err});
+                std.process.exit(@intCast(@intFromEnum(err)));
             } else if (cqe.res != data.iov.len) {
                 // short read/write; adjust and requeue
-                data.iov.iov_base += cqe.res;
-                data.iov.iov_len -= cqe.res;
-                queue_prepped(ring, data);
+                data.iov.base += @intCast(cqe.res);
+                data.iov.len -= @intCast(cqe.res);
+                try queue_prepped(ring, infile, outfile, data);
                 // ring.cqe_seen(cqe); // not needed with copy_cqe
                 continue;
             }
 
             // All done. If write, nothing else to do. If read,
             // queue up corresponding write.
-
             if (data.read) {
-                queue_write(ring, data);
+                // TOOD: use written bytes from `queue_write`
+                _ = try queue_write(ring, infile, outfile, data);
                 write_left -= data.first_len;
                 reads -= 1;
                 writes += 1;
             } else {
-                allocator.free(data);
+                allocator.destroy(data);
                 writes -= 1;
             }
             // ring.cqe_seen(cqe);
         }
     }
-
-    return 0;
 }
 
 fn cqe_get_data(comptime T: type, cqe: *const linux.io_uring_cqe) *T {
     return @as(*T, @ptrFromInt(cqe.*.user_data));
 }
 
-pub fn main() !void {
+fn dump_sqe(sqe: *linux.io_uring_sqe) void {
+    log.debug(
+        \\
+        \\sqe->opcode = {t}
+        \\sqe->flags = Ox{x}
+        \\sqe->ioprio = {d}
+        \\sqe->fd = {d}
+        \\sqe->off = {d}
+        \\sqe->addr = Ox{x}
+        \\sqe->len = {d}
+        \\sqe->rw_flags = {d}
+        \\sqe->user_data = Ox{x}
+        \\sqe->buf_index = {d}
+        \\sqe->personality = {d}
+        \\sqe->splice_fd_in = {d}
+        \\sqe->addr3 = {d}
+        \\sqe->resv = {d}
+    , .{
+        sqe.opcode,
+        sqe.flags,
+        sqe.ioprio,
+        sqe.fd,
+        sqe.off,
+        sqe.addr,
+        sqe.len,
+        sqe.rw_flags,
+        sqe.user_data,
+        sqe.buf_index,
+        sqe.personality,
+        sqe.splice_fd_in,
+        sqe.addr3,
+        sqe.resv,
+    });
+}
+
+pub fn main() !u8 {
     var dbg_alloc: std.heap.DebugAllocator(.{}) = .init;
     const dbga = dbg_alloc.allocator();
 
@@ -159,28 +187,29 @@ pub fn main() !void {
     defer std.process.argsFree(dbga, argv);
 
     var stderr_buf: [1024]u8 = undefined;
-    var stderr_w = std.fs.File.stderr().writer(&stderr_buf);
-    var stderr = &stderr_w.interface;
-    defer stderr.flush() catch unreachable;
+    var stderr = std.fs.File.stderr().writer(&stderr_buf);
+    const stderr_w = &stderr.interface;
+    defer stderr_w.flush() catch unreachable;
 
     if (argc < 3) {
         try stderr_w.print("Usage: {s} <infile> <outfile>\n", .{argv[0]});
+        return 3;
     }
 
     const cwd = fs.cwd();
-    const infd = try cwd.openFile(argv[1], .{ .mode = .read_only });
-    defer infd.close();
+    const infile = try cwd.openFile(argv[1], .{ .mode = .read_only });
+    defer infile.close();
 
-    const outfd = try cwd.openFile(argv[2], .{ .mode = .read_write }); //O_WRONLY | O_CREAT | O_TRUNC, 0644
-    defer outfd.close();
+    const outfile = try cwd.createFile(argv[2], .{ .mode = 0o644, .truncate = true });
+    defer outfile.close();
 
     const flags = 0;
     var ring = try setup_context(queue_depth, flags);
     defer ring.deinit();
 
-    const insize = (try infd.stat()).size;
+    const insize = (try infile.stat()).size;
 
-    const ret = try copy_file(&ring, stderr, dbga, insize);
+    try copy_file(&ring, dbga, infile, outfile, insize);
 
-    return ret;
+    return 0;
 }
