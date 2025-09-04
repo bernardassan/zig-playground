@@ -31,9 +31,9 @@ fn queue_prepped(ring: *IoUring, infile: fs.File, outfile: fs.File, data: *io_da
     const sqe = try ring.get_sqe();
 
     if (data.read) {
-        sqe.prep_readv(infile.handle, &.{data.iov}, data.offset);
+        sqe.prep_readv(infile.handle, @ptrCast(&data.iov), data.offset);
     } else {
-        sqe.prep_writev(outfile.handle, &.{@bitCast(data.iov)}, data.offset);
+        sqe.prep_writev(outfile.handle, @ptrCast(&data.iov), data.offset);
     }
     dump_sqe(sqe);
     sqe_set_data(sqe, data);
@@ -58,7 +58,7 @@ fn queue_read(ring: *IoUring, allocator: std.mem.Allocator, infile: fs.File, siz
     data.iov.len = size;
     data.first_len = size;
 
-    sqe.prep_readv(infile.handle, &.{data.iov}, offset);
+    sqe.prep_readv(infile.handle, @ptrCast(&data.iov), offset);
     dump_sqe(sqe);
     sqe_set_data(sqe, data);
 }
@@ -75,8 +75,9 @@ fn queue_write(ring: *IoUring, infile: fs.File, outfile: fs.File, data: *io_data
 }
 
 fn copy_file(ring: *IoUring, allocator: mem.Allocator, infile: fs.File, outfile: fs.File, insize: usize) !void {
-    var write_left: usize = insize;
     const end = 0;
+
+    var write_left: usize = insize;
     var insize_ = insize;
     while (insize_ != end or write_left != end) {
         var offset: usize = 0;

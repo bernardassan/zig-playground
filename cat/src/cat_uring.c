@@ -59,12 +59,12 @@ struct file_info {
  * functions.
  * */
 
-int io_uring_setup(unsigned entries, struct io_uring_params *params) {
+static int io_uring_setup(unsigned entries, struct io_uring_params *params) {
   return (int)syscall(__NR_io_uring_setup, entries, params);
 }
 
-int io_uring_enter(int ring_fd, unsigned int to_submit,
-                   unsigned int min_complete, unsigned int flags) {
+static int io_uring_enter(int ring_fd, unsigned int to_submit,
+                          unsigned int min_complete, unsigned int flags) {
   return (int)syscall(__NR_io_uring_enter, ring_fd, to_submit, min_complete,
                       flags, NULL, 0);
 }
@@ -74,7 +74,7 @@ int io_uring_enter(int ring_fd, unsigned int to_submit,
  * Properly handles regular file and block devices as well. Pretty.
  * */
 
-off_t get_file_size(int fd) {
+static off_t get_file_size(int fd) {
   struct stat stat;
 
   if (fstat(fd, &stat) < 0) {
@@ -107,7 +107,7 @@ off_t get_file_size(int fd) {
  * it does offer you a certain strange geeky peace.
  * */
 
-int app_setup_uring(struct submitter *sub) {
+static int app_setup_uring(struct submitter *sub) {
   struct io_uring_params params;
   /*
    * We need to pass in the io_uring_params structure to the io_uring_setup()
@@ -209,9 +209,9 @@ int app_setup_uring(struct submitter *sub) {
  * We use buffered output here to be efficient,
  * since we need to output character-by-character.
  * */
-void output_to_console(char *buf, size_t len) {
+static void output_to_console(char *buf, size_t len) {
   while (len--) {
-    fputc(*buf++, stdout);
+    (void)fputc(*buf++, stdout);
   }
 }
 
@@ -221,7 +221,7 @@ void output_to_console(char *buf, size_t len) {
  * the data buffer that will have the file data and print it to the console.
  * */
 
-void read_from_cq(struct submitter *sub) {
+static void read_from_cq(struct submitter *sub) {
   struct app_io_cq_ring *cring = &sub->cq_ring;
 
   unsigned head = *cring->head;
@@ -267,7 +267,7 @@ void read_from_cq(struct submitter *sub) {
  * specify via IORING_OP_READV.
  *
  * */
-int submit_to_sq(char *file_path, struct submitter *sub) {
+static int submit_to_sq(char *file_path, struct submitter *sub) {
 
   int file_fd = open(file_path, O_RDONLY | O_CLOEXEC);
   if (file_fd < 0) {

@@ -12,6 +12,7 @@
 #define QD 2
 #define BS (16 * 1024)
 
+static void dump_sqe(struct io_uring_sqe *sqe);
 static int infd, outfd;
 
 struct io_data {
@@ -26,7 +27,7 @@ static int setup_context(unsigned entries, struct io_uring *ring) {
 
   ret = io_uring_queue_init(entries, ring, 0);
   if (ret < 0) {
-    fprintf(stderr, "queue_init: %s\n", strerror(-ret));
+    (void)fprintf(stderr, "queue_init: %s\n", strerror(-ret));
     return -1;
   }
 
@@ -64,6 +65,7 @@ static void queue_prepped(struct io_uring *ring, struct io_data *data) {
   else
     io_uring_prep_writev(sqe, outfd, &data->iov, 1, data->offset);
 
+  dump_sqe(sqe);
   io_uring_sqe_set_data(sqe, data);
 }
 
@@ -89,6 +91,7 @@ static int queue_read(struct io_uring *ring, off_t size, off_t offset) {
   data->first_len = size;
 
   io_uring_prep_readv(sqe, infd, &data->iov, 1, offset);
+  dump_sqe(sqe);
   io_uring_sqe_set_data(sqe, data);
   return 0;
 }
@@ -203,6 +206,25 @@ int copy_file(struct io_uring *ring, off_t insize) {
   }
 
   return 0;
+}
+
+static void dump_sqe(struct io_uring_sqe *sqe) {
+  printf("sqe->opcode = 0x%02x\n"
+         "sqe->flags = 0x%08x\n"
+         "sqe->ioprio = %d\n"
+         "sqe->fd = %d\n"
+         "sqe->off = %llu\n"
+         "sqe->addr = 0x%016llu\n"
+         "sqe->len = %u\n"
+         "sqe->rw_flags = %d\n"
+         "sqe->buf_index = %d\n"
+         "sqe->personality = %d\n"
+         "sqe->file_index = %u\n"
+         "sqe->addr3 = %llu\n"
+         "sqe->__pad2[0] = %llu\n\n",
+         sqe->opcode, sqe->flags, sqe->ioprio, sqe->fd, sqe->off, sqe->addr,
+         sqe->len, sqe->rw_flags, sqe->buf_index, sqe->personality,
+         sqe->file_index, sqe->addr3, sqe->__pad2[0]);
 }
 
 int main(int argc, char *argv[]) {
