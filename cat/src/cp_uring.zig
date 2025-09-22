@@ -99,8 +99,9 @@ fn copy_file(ring: *IoUring, stderr: *Io.Writer, allocator: mem.Allocator, insiz
 
         if (had_reads != reads) {
             const ret = try ring.submit();
-            if (ret < 0) {
-                try stderr.print("io_uring_submit: {s}\n", .{-ret});
+            const err = std.posix.errno(@as(isize, ret));
+            if (err != .SUCCESS) {
+                std.debug.print("io_uring_submit: {t}\n", .{err});
                 break;
             }
         }
