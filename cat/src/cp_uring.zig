@@ -16,7 +16,7 @@ const log = std.log.scoped(.cp_uring);
 
 const IoData = struct {
     read: bool,
-    offset: usize,
+    offset: u32,
     iov: posix.iovec,
 };
 
@@ -41,12 +41,12 @@ fn sqe_set_data(sqe: *linux.io_uring_sqe, io_data: *anyopaque) void {
     sqe.user_data = @intFromPtr(io_data);
 }
 
-fn queue_read(ring: *IoUring, arena: std.mem.Allocator, infile: fs.File, size: usize, offset: usize) !void {
-    // data = malloc(size + sizeof(*data));
-    // TODO: combine
-    const io_data = try arena.create(IoData);
-    errdefer arena.destroy(io_data);
-    const iov_mem = try arena.alloc(u8, size);
+fn queue_read(ring: *IoUring, arena: std.mem.Allocator, infile: fs.File, size: u64, offset: u32) !void {
+    const memory = try arena.alloc(u8, @sizeOf(IoData) + size);
+    errdefer arena.free(memory);
+
+    const io_data: *IoData = @ptrCast(@alignCast(memory[0..@sizeOf(IoData)]));
+    const iov_mem: []u8 = @ptrCast(memory[@sizeOf(IoData)..]);
 
     io_data.* = .{
         .read = true,
@@ -74,16 +74,16 @@ fn queue_write(ring: *IoUring, infile: fs.File, outfile: fs.File, data: *IoData)
     return try ring.submit();
 }
 
-fn copy_file(ring: *IoUring, allocator: mem.Allocator, infile: fs.File, outfile: fs.File, insize: usize) !void {
+fn copy_file(ring: *IoUring, allocator: mem.Allocator, infile: fs.File, insize: u64, outfile: fs.File) !void {
     const end = 0;
     const empty = end;
 
     var write_left: usize = insize;
     var insize_ = insize;
     while (insize_ != end or write_left != empty) {
-        var offset: usize = 0;
-        var reads = offset;
-        var writes = offset;
+        var offset: u32 = 0;
+        var reads: u32 = 0;
+        var writes: u32 = 0;
         // Queue up as many reads as we can
         const had_reads = reads;
 
@@ -92,7 +92,7 @@ fn copy_file(ring: *IoUring, allocator: mem.Allocator, infile: fs.File, outfile:
 
             const this_size = if (insize_ > block_sz) block_sz else if (insize_ == 0) break else insize_;
             defer insize_ -= this_size;
-            defer offset += this_size;
+            defer offset += @intCast(this_size);
 
             try queue_read(ring, allocator, infile, this_size, offset);
         }
@@ -110,7 +110,6 @@ fn copy_file(ring: *IoUring, allocator: mem.Allocator, infile: fs.File, outfile:
                 const err = cqe.err();
                 if (err == .AGAIN) {
                     try queue_prepped(ring, infile, outfile, io_data);
-                    // ring.cqe_seen(cqe); // not needed with copy_cqe
                     continue;
                 }
                 log.err("cqe failed: {t}", .{err});
@@ -120,7 +119,6 @@ fn copy_file(ring: *IoUring, allocator: mem.Allocator, infile: fs.File, outfile:
                 io_data.iov.base += @intCast(cqe.res);
                 io_data.iov.len -= @intCast(cqe.res);
                 try queue_prepped(ring, infile, outfile, io_data);
-                // ring.cqe_seen(cqe); // not needed with copy_cqe
                 continue;
             }
 
@@ -136,7 +134,6 @@ fn copy_file(ring: *IoUring, allocator: mem.Allocator, infile: fs.File, outfile:
                 allocator.destroy(io_data);
                 writes -= 1;
             }
-            // ring.cqe_seen(cqe);
         }
     }
 }
@@ -211,7 +208,7 @@ pub fn main() !u8 {
 
     const insize = (try infile.stat()).size;
 
-    try copy_file(&ring, dbga, infile, outfile, insize);
+    try copy_file(&ring, dbga, infile, insize, outfile);
 
     return 0;
 }
