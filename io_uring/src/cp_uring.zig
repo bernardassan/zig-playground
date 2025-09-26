@@ -77,12 +77,13 @@ fn copy_file(ring: *IoUring, allocator: mem.Allocator, infile: fs.File, outfile:
     var reads_left = (try infile.stat()).size;
     var writes_left = reads_left;
 
+    // ensure that all bytes from the source file are copied
     while (reads_left != empty or writes_left != empty) {
         var offset: u32 = 0;
         var reads: u32 = 0;
         var writes: u32 = 0;
 
-        // Queue up as many reads as we can
+        // Queue up as many reads as `queue_depth`
         while (reads_left != empty) : (reads += 1) {
             if (reads + writes >= queue_depth) break;
 
@@ -97,7 +98,8 @@ fn copy_file(ring: *IoUring, allocator: mem.Allocator, infile: fs.File, outfile:
             _ = try ring.submit();
         }
 
-        // Queue is full at this point. Let's find at least one completion
+        // Queue is full at this point. Let's find at least one completion and
+        // submit requests to write the read content to the destination file
         while (writes_left != empty) {
             const cqe = try ring.copy_cqe();
 
@@ -201,7 +203,10 @@ pub fn main() !u8 {
     const outfile = try cwd.createFile(argv[2], .{ .mode = 0o644, .truncate = true });
     defer outfile.close();
 
-    const flags = 0;
+    // https://man.archlinux.org/man/io_uring_setup.2.en#IORING_SETUP_COOP_TASKRUN
+    // https://man.archlinux.org/man/io_uring_setup.2.en#IORING_SETUP_SQPOLL
+    const flags = linux.IORING_SETUP_SQPOLL;
+    // | linux.IORING_SETUP_COOP_TASKRUN | linux.IORING_SETUP_TASKRUN_FLAG;
     var ring = try setup_context(queue_depth, flags);
     defer ring.deinit();
 

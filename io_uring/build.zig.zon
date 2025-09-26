@@ -1,5 +1,5 @@
 .{
-    .name = .cat,
+    .name = .io_uring,
     .version = "0.0.0",
     .fingerprint = 0x9e5e43a80d7194c8,
     .minimum_zig_version = "0.15.1",
