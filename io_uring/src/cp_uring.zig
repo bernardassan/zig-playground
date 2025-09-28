@@ -20,8 +20,91 @@ const IoData = struct {
     iov: posix.iovec,
 };
 
-fn setup_context(entries: u16, flags: u32) !IoUring {
-    const uring = try IoUring.init(entries, flags);
+/// io_uring_setup() flags
+const Setup = struct {
+    pub const Flags = packed struct(u32) {
+        /// io_context is polled
+        IOPOLL: bool = false,
+        /// SQ poll thread
+        SQPOLL: bool = false,
+        /// sq_thread_cpu is valid
+        SQ_AFF: bool = false,
+        /// app defines CQ size
+        CQSIZE: bool = false,
+        /// clamp SQ/CQ ring sizes
+        CLAMP: bool = false,
+        /// attach to existing wq
+        ATTACH_WQ: bool = false,
+        /// start with ring disabled
+        R_DISABLED: bool = false,
+        /// continue submit on error
+        SUBMIT_ALL: bool = false,
+        ///Cooperative task running. When requests complete, they often require
+        ///forcing the submitter to transition to the kernel to complete. If this
+        ///flag is set, work will be done when the task transitions anyway, rather
+        ///than force an inter-processor interrupt reschedule. This avoids interrupting
+        ///a task running in userspace, and saves an IPI.
+        COOP_TASKRUN: bool = false,
+        ///If COOP_TASKRUN is set, get notified if task work is available for
+        ///running and a kernel transition would be needed to run it. This sets
+        ///IORING_SQ_TASKRUN in the sq ring flags. Not valid with COOP_TASKRUN.
+        TASKRUN_FLAG: bool = false,
+        /// SQEs are 128 byte
+        SQE128: bool = false,
+        /// CQEs are 32 byte
+        CQE32: bool = false,
+        /// Only one task is allowed to submit requests
+        SINGLE_ISSUER: bool = false,
+        /// Defer running task work to get events.
+        /// Rather than running bits of task work whenever the task transitions
+        /// try to do it just before it is needed.
+        DEFER_TASKRUN: bool = false,
+        /// Application provides the memory for the rings
+        NO_MMAP: bool = false,
+        /// Register the ring fd in itself for use with
+        /// IORING_REGISTER_USE_REGISTERED_RING; return a registered fd index rather
+        /// than an fd.
+        REGISTERED_FD_ONLY: bool = false,
+        /// Removes indirection through the SQ index array.
+        NO_SQARRAY: bool = false,
+        /// Use hybrid poll in iopoll process
+        HYBRID_IOPOLL: bool = false,
+        /// Allow both 16b and 32b CQEs. If a 32b CQE is posted, it will have
+        /// IORING_CQE_F_32 set in cqe.flags.
+        CQE_MIXED: bool = false,
+        _unused: u13 = 0,
+    };
+};
+
+// io_uring_params.features flags
+const Features = packed struct(u32) {
+    SINGLE_MMAP: bool = false,
+    NODROP: bool = false,
+    SUBMIT_STABLE: bool = false,
+    RW_CUR_POS: bool = false,
+    CUR_PERSONALITY: bool = false,
+    FAST_POLL: bool = false,
+    POLL_32BITS: bool = false,
+    SQPOLL_NONFIXED: bool = false,
+    EXT_ARG: bool = false,
+    NATIVE_WORKERS: bool = false,
+    RSRC_TAGS: bool = false,
+    CQE_SKIP: bool = false,
+    LINKED_FILE: bool = false,
+    REG_REG_RING: bool = false,
+    RECVSEND_BUNDLE: bool = false,
+    MIN_TIMEOUT: bool = false,
+    RW_ATTR: bool = false,
+    NO_IOWAIT: bool = false,
+    _unused: u14 = 0,
+};
+
+fn setup_context(entries: u16, flags: Setup.Flags) !IoUring {
+    const uring = try IoUring.init(entries, @bitCast(flags));
+    const features: Features = @bitCast(uring.features);
+    if (features.FAST_POLL) {
+        log.info("IORING_FEAT_FAST_POLL is enabled on this kernel\n", .{});
+    }
     return uring;
 }
 
@@ -205,8 +288,14 @@ pub fn main() !u8 {
 
     // https://man.archlinux.org/man/io_uring_setup.2.en#IORING_SETUP_COOP_TASKRUN
     // https://man.archlinux.org/man/io_uring_setup.2.en#IORING_SETUP_SQPOLL
-    const flags = linux.IORING_SETUP_SQPOLL;
-    // | linux.IORING_SETUP_COOP_TASKRUN | linux.IORING_SETUP_TASKRUN_FLAG;
+    // https://github.com/axboe/liburing/issues/811#issuecomment-2489922088
+    const flags: Setup.Flags = .{
+        .SUBMIT_ALL = true,
+        .COOP_TASKRUN = true,
+        .TASKRUN_FLAG = true,
+        .SINGLE_ISSUER = true,
+        .DEFER_TASKRUN = true,
+    };
     var ring = try setup_context(queue_depth, flags);
     defer ring.deinit();
 
