@@ -37,7 +37,7 @@ fn queue_prepped(ring: *IoUring, infile: ?fs.File, outfile: ?fs.File, io_data: *
     sqe_set_data(sqe, io_data);
 }
 
-fn sqe_set_data(sqe: *linux.io_uring_sqe, io_data: *anyopaque) void {
+fn sqe_set_data(sqe: *linux.io_uring_sqe, io_data: *IoData) void {
     sqe.user_data = @intFromPtr(io_data);
 }
 
@@ -139,7 +139,7 @@ fn copy_file(ring: *IoUring, allocator: mem.Allocator, infile: fs.File, outfile:
 }
 
 fn cqe_get_data(comptime T: type, cqe: *const linux.io_uring_cqe) *T {
-    return @as(*T, @ptrFromInt(cqe.*.user_data));
+    return @ptrFromInt(cqe.*.user_data);
 }
 
 fn dump_sqe(sqe: *linux.io_uring_sqe) void {
