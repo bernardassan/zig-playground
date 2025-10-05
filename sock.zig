@@ -46,7 +46,7 @@ pub const Sock = packed struct(u32) {
 };
 
 // Constants for backward compatibility and testing
-pub const SOCK = struct {
+pub const SOCK_ = struct {
     pub const STREAM: u32 = if (is_mips) 2 else 1;
     pub const DGRAM: u32 = if (is_mips) 1 else 2;
     pub const RAW: u32 = 3;
@@ -57,6 +57,33 @@ pub const SOCK = struct {
     pub const CLOEXEC: u32 = if (is_sparc) 0o20000000 else 0o2000000;
     pub const NONBLOCK: u32 = if (is_mips) 0o200 else if (is_sparc) 0o40000 else 0o4000;
 };
+
+pub const SOCK = struct {
+    pub const Type = Sock.Type;
+    pub const Flags = Sock.Flags;
+    pub const STREAM: u32 = @intFromEnum(Type.stream);
+    pub const DGRAM: u32 = @intFromEnum(Type.dgram);
+    pub const RAW: u32 = @intFromEnum(Type.raw);
+    pub const RDM: u32 = @intFromEnum(Type.rdm);
+    pub const SEQPACKET: u32 = @intFromEnum(Type.seqpacket);
+    pub const DCCP: u32 = @intFromEnum(Type.dccp);
+    pub const PACKET: u32 = @intFromEnum(Type.packet);
+    pub const CLOEXEC: u32 = (@as(u25, @bitCast(Flags{ .cloexec = true })) << 7);
+    pub const NONBLOCK: u32 = (@as(u25, @bitCast(Flags{ .nonblock = true })) << 7);
+};
+
+test "SOCK - Sock" {
+    try testing.expectEqual(SOCK.STREAM, SOCK_.STREAM);
+    try testing.expectEqual(SOCK.DGRAM, SOCK_.DGRAM);
+    try testing.expectEqual(SOCK.RAW, SOCK_.RAW);
+    try testing.expectEqual(SOCK.RDM, SOCK_.RDM);
+    try testing.expectEqual(SOCK.SEQPACKET, SOCK_.SEQPACKET);
+    try testing.expectEqual(SOCK.DCCP, SOCK_.DCCP);
+    try testing.expectEqual(SOCK.PACKET, SOCK_.PACKET);
+
+    try testing.expectEqual(SOCK.CLOEXEC, SOCK_.CLOEXEC);
+    try testing.expectEqual(SOCK.NONBLOCK, SOCK_.NONBLOCK);
+}
 
 test "SocketType - enum values" {
     try testing.expectEqual(SOCK.STREAM, @as(u32, @bitCast(Sock{ .type = .stream })));
@@ -76,9 +103,11 @@ test "SocketFlags - create with type only" {
 
 test "SocketFlags - type with CLOEXEC" {
     var sock: Sock = .{ .type = .stream };
+    std.debug.print(" var sock: Sock = .{{ .type = .stream }}; = {}\n", .{@as(u32, @bitCast(sock))});
     sock.flags.cloexec = true;
-
+    std.debug.print(" sock.flags.cloexec = true; {}\n", .{@as(u32, @bitCast(sock))});
     const expected: u32 = SOCK.STREAM | SOCK.CLOEXEC;
+    std.debug.print("STREAM {} SOCK.CLOEXEC {}\n", .{ SOCK.STREAM, SOCK.CLOEXEC });
     try testing.expectEqual(expected, @as(u32, @bitCast(sock)));
 }
 
@@ -156,6 +185,8 @@ test "Sock.Flags - verify bit positions" {
     try testing.expectEqual(SOCK.CLOEXEC, cloexec_value);
 }
 
+/// Deprecated alias to Shut
+pub const SHUT = Shut;
 /// enum sock_shutdown_cmd - Shutdown types
 /// matches SHUT_* in kenel
 pub const Shut = enum(u32) {
@@ -167,6 +198,11 @@ pub const Shut = enum(u32) {
     rdwr = 2,
 
     _,
+
+    // deprecated constants of the fields
+    pub const RD: u32 = @intFromEnum(Shut.rd);
+    pub const WR: u32 = @intFromEnum(Shut.wd);
+    pub const RDWR: u32 = @intFromEnum(Shut.rdwr);
 };
 
 /// matches AT_* and AT_STATX_*

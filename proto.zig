@@ -1,6 +1,8 @@
 const std = @import("std");
 const testing = std.testing;
 
+pub const IPPROTO_ = std.os.linux.IPPROTO;
+pub const IPPROTO = IpProto;
 /// IP Protocol numbers
 pub const IpProto = enum(u16) {
     ip = 0,
@@ -39,43 +41,41 @@ pub const IpProto = enum(u16) {
 
     // Aliases
     pub const hopopts = IpProto.ip;
-};
 
-// Legacy constants for backward compatibility
-pub const IPPROTO = struct {
-    pub const IP = 0;
-    pub const HOPOPTS = 0;
-    pub const ICMP = 1;
-    pub const IGMP = 2;
-    pub const IPIP = 4;
-    pub const TCP = 6;
-    pub const EGP = 8;
-    pub const PUP = 12;
-    pub const UDP = 17;
-    pub const IDP = 22;
-    pub const TP = 29;
-    pub const DCCP = 33;
-    pub const IPV6 = 41;
-    pub const ROUTING = 43;
-    pub const FRAGMENT = 44;
-    pub const RSVP = 46;
-    pub const GRE = 47;
-    pub const ESP = 50;
-    pub const AH = 51;
-    pub const ICMPV6 = 58;
-    pub const NONE = 59;
-    pub const DSTOPTS = 60;
-    pub const MTP = 92;
-    pub const BEETPH = 94;
-    pub const ENCAP = 98;
-    pub const PIM = 103;
-    pub const COMP = 108;
-    pub const SCTP = 132;
-    pub const MH = 135;
-    pub const UDPLITE = 136;
-    pub const MPLS = 137;
-    pub const RAW = 255;
-    pub const MAX = 256;
+    // Legacy constants for backward compatibility
+    pub const IP: u16 = @intFromEnum(IpProto.ip);
+    pub const HOPOPTS: u16 = @intFromEnum(hopopts);
+    pub const ICMP: u16 = @intFromEnum(IpProto.icmp);
+    pub const IGMP: u16 = @intFromEnum(IpProto.igmp);
+    pub const IPIP: u16 = @intFromEnum(IpProto.ipip);
+    pub const TCP: u16 = @intFromEnum(IpProto.tcp);
+    pub const EGP: u16 = @intFromEnum(IpProto.egp);
+    pub const PUP: u16 = @intFromEnum(IpProto.pup);
+    pub const UDP: u16 = @intFromEnum(IpProto.udp);
+    pub const IDP: u16 = @intFromEnum(IpProto.idp);
+    pub const TP: u16 = @intFromEnum(IpProto.tp);
+    pub const DCCP: u16 = @intFromEnum(IpProto.dccp);
+    pub const IPV6: u16 = @intFromEnum(IpProto.ipv6);
+    pub const ROUTING: u16 = @intFromEnum(IpProto.routing);
+    pub const FRAGMENT: u16 = @intFromEnum(IpProto.fragment);
+    pub const RSVP: u16 = @intFromEnum(IpProto.rsvp);
+    pub const GRE: u16 = @intFromEnum(IpProto.gre);
+    pub const ESP: u16 = @intFromEnum(IpProto.esp);
+    pub const AH: u16 = @intFromEnum(IpProto.ah);
+    pub const ICMPV6: u16 = @intFromEnum(IpProto.icmpv6);
+    pub const NONE: u16 = @intFromEnum(IpProto.none);
+    pub const DSTOPTS: u16 = @intFromEnum(IpProto.DSTOPTS);
+    pub const MTP: u16 = @intFromEnum(IpProto.mtp);
+    pub const BEETPH: u16 = @intFromEnum(IpProto.beetph);
+    pub const ENCAP: u16 = @intFromEnum(IpProto.encap);
+    pub const PIM: u16 = @intFromEnum(IpProto.pim);
+    pub const COMP: u16 = @intFromEnum(IpProto.comp);
+    pub const SCTP: u16 = @intFromEnum(IpProto.sctp);
+    pub const MH: u16 = @intFromEnum(IpProto.mh);
+    pub const UDPLITE: u16 = @intFromEnum(IpProto.udplite);
+    pub const MPLS: u16 = @intFromEnum(IpProto.mpls);
+    pub const RAW: u16 = @intFromEnum(IpProto.raw);
+    pub const MAX: u16 = @intFromEnum(IpProto.max);
 };
 
 test "IpProtocol - common protocols match constants" {

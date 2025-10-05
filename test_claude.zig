@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 
-pub const StatxMask = packed struct(u32) {
+pub const Mask = packed struct(u32) {
     /// Want/got stx_mode & S_IFMT
     type: bool = false,
     /// Want/got stx_mode & ~S_IFMT
@@ -34,6 +34,7 @@ pub const StatxMask = packed struct(u32) {
     mnt_id_unique: bool = false,
     /// Want/got stx_subvol
     subvol: bool = false,
+
     /// Want/got atomic_write_* fields
     write_atomic: bool = false,
     /// Want/got dio read alignment info
@@ -41,7 +42,7 @@ pub const StatxMask = packed struct(u32) {
     _: u14 = 0,
 
     /// The stuff in the normal stat struct (bits 0-10)
-    pub const basic_stats: StatxMask = .{
+    pub const basic_stats: Mask = .{
         .type = true,
         .mode = true,
         .nlink = true,
@@ -56,7 +57,7 @@ pub const StatxMask = packed struct(u32) {
     };
 };
 
-pub const StatxAttr = packed struct(u64) {
+pub const Attr = packed struct(u64) {
     _0: u2 = 0,
     /// File is compressed by the fs
     compressed: bool = false,
@@ -117,39 +118,39 @@ test "StatxMask - individual fields match constants" {
     const STATX_ATTR_DAX: u64 = 0x00200000;
     const STATX_ATTR_WRITE_ATOMIC: u64 = 0x00400000;
 
-    try testing.expectEqual(STATX_TYPE, @as(u32, @bitCast(StatxMask{ .type = true })));
-    try testing.expectEqual(STATX_MODE, @as(u32, @bitCast(StatxMask{ .mode = true })));
-    try testing.expectEqual(STATX_NLINK, @as(u32, @bitCast(StatxMask{ .nlink = true })));
-    try testing.expectEqual(STATX_UID, @as(u32, @bitCast(StatxMask{ .uid = true })));
-    try testing.expectEqual(STATX_GID, @as(u32, @bitCast(StatxMask{ .gid = true })));
-    try testing.expectEqual(STATX_ATIME, @as(u32, @bitCast(StatxMask{ .atime = true })));
-    try testing.expectEqual(STATX_MTIME, @as(u32, @bitCast(StatxMask{ .mtime = true })));
-    try testing.expectEqual(STATX_CTIME, @as(u32, @bitCast(StatxMask{ .ctime = true })));
-    try testing.expectEqual(STATX_INO, @as(u32, @bitCast(StatxMask{ .ino = true })));
-    try testing.expectEqual(STATX_SIZE, @as(u32, @bitCast(StatxMask{ .size = true })));
-    try testing.expectEqual(STATX_BLOCKS, @as(u32, @bitCast(StatxMask{ .blocks = true })));
-    try testing.expectEqual(STATX_BTIME, @as(u32, @bitCast(StatxMask{ .btime = true })));
-    try testing.expectEqual(STATX_MNT_ID, @as(u32, @bitCast(StatxMask{ .mnt_id = true })));
-    try testing.expectEqual(STATX_DIOALIGN, @as(u32, @bitCast(StatxMask{ .dioalign = true })));
-    try testing.expectEqual(STATX_MNT_ID_UNIQUE, @as(u32, @bitCast(StatxMask{ .mnt_id_unique = true })));
-    try testing.expectEqual(STATX_SUBVOL, @as(u32, @bitCast(StatxMask{ .subvol = true })));
-    try testing.expectEqual(STATX_WRITE_ATOMIC, @as(u32, @bitCast(StatxMask{ .write_atomic = true })));
-    try testing.expectEqual(STATX_DIO_READ_ALIGN, @as(u32, @bitCast(StatxMask{ .dio_read_align = true })));
+    try testing.expectEqual(STATX_TYPE, @as(u32, @bitCast(Mask{ .type = true })));
+    try testing.expectEqual(STATX_MODE, @as(u32, @bitCast(Mask{ .mode = true })));
+    try testing.expectEqual(STATX_NLINK, @as(u32, @bitCast(Mask{ .nlink = true })));
+    try testing.expectEqual(STATX_UID, @as(u32, @bitCast(Mask{ .uid = true })));
+    try testing.expectEqual(STATX_GID, @as(u32, @bitCast(Mask{ .gid = true })));
+    try testing.expectEqual(STATX_ATIME, @as(u32, @bitCast(Mask{ .atime = true })));
+    try testing.expectEqual(STATX_MTIME, @as(u32, @bitCast(Mask{ .mtime = true })));
+    try testing.expectEqual(STATX_CTIME, @as(u32, @bitCast(Mask{ .ctime = true })));
+    try testing.expectEqual(STATX_INO, @as(u32, @bitCast(Mask{ .ino = true })));
+    try testing.expectEqual(STATX_SIZE, @as(u32, @bitCast(Mask{ .size = true })));
+    try testing.expectEqual(STATX_BLOCKS, @as(u32, @bitCast(Mask{ .blocks = true })));
+    try testing.expectEqual(STATX_BTIME, @as(u32, @bitCast(Mask{ .btime = true })));
+    try testing.expectEqual(STATX_MNT_ID, @as(u32, @bitCast(Mask{ .mnt_id = true })));
+    try testing.expectEqual(STATX_DIOALIGN, @as(u32, @bitCast(Mask{ .dioalign = true })));
+    try testing.expectEqual(STATX_MNT_ID_UNIQUE, @as(u32, @bitCast(Mask{ .mnt_id_unique = true })));
+    try testing.expectEqual(STATX_SUBVOL, @as(u32, @bitCast(Mask{ .subvol = true })));
+    try testing.expectEqual(STATX_WRITE_ATOMIC, @as(u32, @bitCast(Mask{ .write_atomic = true })));
+    try testing.expectEqual(STATX_DIO_READ_ALIGN, @as(u32, @bitCast(Mask{ .dio_read_align = true })));
 
     // StatxMask - basic_stats constant
-    const mask_value: u32 = @bitCast(StatxMask.basic_stats);
+    const mask_value: u32 = @bitCast(Mask.basic_stats);
     try testing.expectEqual(STATX_BASIC_STATS, mask_value);
     // StatxAttr - individual fields match constants
-    try testing.expectEqual(STATX_ATTR_COMPRESSED, @as(u64, @bitCast(StatxAttr{ .compressed = true })));
-    try testing.expectEqual(STATX_ATTR_IMMUTABLE, @as(u64, @bitCast(StatxAttr{ .immutable = true })));
-    try testing.expectEqual(STATX_ATTR_APPEND, @as(u64, @bitCast(StatxAttr{ .append = true })));
-    try testing.expectEqual(STATX_ATTR_NODUMP, @as(u64, @bitCast(StatxAttr{ .nodump = true })));
-    try testing.expectEqual(STATX_ATTR_ENCRYPTED, @as(u64, @bitCast(StatxAttr{ .encrypted = true })));
-    try testing.expectEqual(STATX_ATTR_AUTOMOUNT, @as(u64, @bitCast(StatxAttr{ .automount = true })));
-    try testing.expectEqual(STATX_ATTR_MOUNT_ROOT, @as(u64, @bitCast(StatxAttr{ .mount_root = true })));
-    try testing.expectEqual(STATX_ATTR_VERITY, @as(u64, @bitCast(StatxAttr{ .verity = true })));
-    try testing.expectEqual(STATX_ATTR_DAX, @as(u64, @bitCast(StatxAttr{ .dax = true })));
-    try testing.expectEqual(STATX_ATTR_WRITE_ATOMIC, @as(u64, @bitCast(StatxAttr{ .write_atomic = true })));
+    try testing.expectEqual(STATX_ATTR_COMPRESSED, @as(u64, @bitCast(Attr{ .compressed = true })));
+    try testing.expectEqual(STATX_ATTR_IMMUTABLE, @as(u64, @bitCast(Attr{ .immutable = true })));
+    try testing.expectEqual(STATX_ATTR_APPEND, @as(u64, @bitCast(Attr{ .append = true })));
+    try testing.expectEqual(STATX_ATTR_NODUMP, @as(u64, @bitCast(Attr{ .nodump = true })));
+    try testing.expectEqual(STATX_ATTR_ENCRYPTED, @as(u64, @bitCast(Attr{ .encrypted = true })));
+    try testing.expectEqual(STATX_ATTR_AUTOMOUNT, @as(u64, @bitCast(Attr{ .automount = true })));
+    try testing.expectEqual(STATX_ATTR_MOUNT_ROOT, @as(u64, @bitCast(Attr{ .mount_root = true })));
+    try testing.expectEqual(STATX_ATTR_VERITY, @as(u64, @bitCast(Attr{ .verity = true })));
+    try testing.expectEqual(STATX_ATTR_DAX, @as(u64, @bitCast(Attr{ .dax = true })));
+    try testing.expectEqual(STATX_ATTR_WRITE_ATOMIC, @as(u64, @bitCast(Attr{ .write_atomic = true })));
 }
 
 pub const RenameFlags = packed struct(u32) {
